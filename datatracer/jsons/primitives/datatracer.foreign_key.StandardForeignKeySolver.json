@@ -56,14 +56,6 @@
             }
         },
         "tunable": {
-            "threshold": {
-                "type": "float",
-                "default": 0.9,
-                "range": [
-                    0.0,
-                    1.0
-                ]
-            },
             "n_estimators": {
                 "type": "int",
                 "default": 10,

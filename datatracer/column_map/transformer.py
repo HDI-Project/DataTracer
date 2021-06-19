@@ -116,6 +116,9 @@ class Transformer:
         """
         obj = {}
         for column, importance in zip(self.columns, feature_importances):
-            obj[column] = importance
+            if column in obj:
+                obj[column] += importance
+            else:
+                obj[column] = importance
 
         return obj

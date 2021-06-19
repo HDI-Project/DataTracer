@@ -9,17 +9,19 @@ from datatracer.primary_key.base import PrimaryKeySolver
 
 class BasicPrimaryKeySolver(PrimaryKeySolver):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, threshold=[i / 20 for i in range(20)], *args, **kwargs):
         self._model_args = args
         self._model_kwargs = kwargs
+        self._threshold = threshold
 
     def _feature_vector(self, table, column_name):
         column = table[column_name]
         return [
             list(table.columns).index(column_name),
-            list(table.columns).index(column_name) / len(table.columns),
+            0.0 if len(table.columns) == 0 else list(
+                table.columns).index(column_name) / len(table.columns),
             1.0 if column.nunique() == len(column) else 0.0,
-            column.nunique() / len(column),
+            0.0 if len(column) == 0 else column.nunique() / len(column),
             1.0 if "key" in column.name else 0.0,
             1.0 if "id" in column.name else 0.0,
             1.0 if "_key" in column.name else 0.0,
@@ -43,29 +45,53 @@ class BasicPrimaryKeySolver(PrimaryKeySolver):
             iterator.set_description("Extracting features from %s" % database_name)
             for table in metadata.get_tables():
                 if "primary_key" not in table:
-                    continue
-                if not isinstance(table["primary_key"], str):
-                    continue
+                    pk = []
+                elif not isinstance(table["primary_key"], str):
+                    pk = table["primary_key"]
+                else:
+                    pk = [table["primary_key"]]
 
-                primary_key = table["primary_key"]
+                table["primary_key"]
                 for column in tables[table["name"]].columns:
                     X.append(self._feature_vector(tables[table["name"]], column))
-                    y.append(1.0 if primary_key == column else 0.0)
+                    y.append(1.0 if column in pk else 0.0)
 
         X, y = np.array(X), np.array(y)
 
         self.model = RandomForestClassifier(*self._model_args, **self._model_kwargs)
         self.model.fit(X, y)
 
-    def _find_primary_key(self, table):
-        best_column, best_score = None, float("-inf")
-        for column in table.columns:
-            score = self.model.predict([self._feature_vector(table, column)])
-            if score > best_score:
-                best_column = column
-                best_score = score
+        if isinstance(self._threshold, list):
+            best_f1 = -float('inf')
+            best_threshold = None
+            pred_y = self.model.predict(X)
+            len_true = sum(y)
+            for threshold in self._threshold:
+                filtered_y = (pred_y >= threshold).astype(float)
+                intersect = sum(filtered_y * y)
+                len_pred = sum(filtered_y)
+                if intersect * len_true * len_pred == 0:
+                    f1 = 0
+                else:
+                    precision = intersect / len_pred
+                    recall = intersect / len_true
+                    f1 = 2.0 * precision * recall / (precision + recall)
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_threshold = threshold
+            self._threshold = best_threshold
 
-        return best_column
+    def _score_all_keys(self, table):
+        return [(column, self.model.predict([self._feature_vector(table, column)]))
+                for column in table.columns]
+
+    def _find_primary_key(self, table):
+        ret = []
+        for column, score in self._score_all_keys(table):
+            if score >= self._threshold:
+                ret.append(column)
+
+        return ret
 
     def solve(self, tables):
         """Solve the problem.
